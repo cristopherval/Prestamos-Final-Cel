@@ -378,7 +378,7 @@
       </div>
 
       <!-- Quick Actions -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:22px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
         <button onclick="openModal('add-client')" class="btn btn-outline" style="width:100%;">
           <i data-lucide="user-plus" size="16"></i> Nuevo Cliente
         </button>
@@ -386,6 +386,9 @@
           <i data-lucide="plus-circle" size="16"></i> Crear Préstamo
         </button>
       </div>
+      <button onclick="openModal('free-invoice')" class="btn btn-outline" style="width:100%;margin-bottom:22px;">
+        <i data-lucide="file-text" size="16"></i> Generar Factura / Recibo
+      </button>
 
       <!-- Today's collections -->
       <div class="section-label">Cobros para hoy</div>
@@ -804,6 +807,48 @@
         <button onclick="closeModal('confirm')" class="btn btn-outline" style="flex:1;">Cancelar</button>
         <button id="confirm-ok-btn" class="btn btn-danger" style="flex:1;">Eliminar</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Free Invoice Modal -->
+<div id="modal-free-invoice" class="modal-wrap hidden">
+  <div class="modal" onclick="event.stopPropagation()" style="max-width:460px;">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <span class="modal-title">Generar Factura / Recibo</span>
+      <button onclick="closeModal('free-invoice')" class="btn btn-ghost btn-icon"><i data-lucide="x" size="20"></i></button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;flex-direction:column;gap:13px;">
+        <div class="input-group">
+          <label class="label">Cliente (opcional)</label>
+          <select id="fi-client" class="input" onchange="fillFiClientData()">
+            <option value="">— Sin cliente vinculado —</option>
+          </select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px;">
+          <div class="input-group"><label class="label">Nombre del deudor *</label><input type="text" id="fi-debtor" class="input" placeholder="Nombre completo" autocapitalize="words"></div>
+          <div class="input-group"><label class="label">Teléfono</label><input type="text" id="fi-phone" class="input" placeholder="9999-9999"></div>
+        </div>
+        <div class="input-group"><label class="label">Cédula / DNI</label><input type="text" id="fi-idcard" class="input" placeholder="0801-..."></div>
+        <div style="height:1px;background:var(--border);"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px;">
+          <div class="input-group"><label class="label">N° Cuota / Referencia</label><input type="text" id="fi-cuota" class="input" placeholder="Ej. Cuota 3 de 8"></div>
+          <div class="input-group"><label class="label">Fecha del recibo *</label><input type="date" id="fi-date" class="input"></div>
+        </div>
+        <div class="input-group"><label class="label">Concepto / Descripción *</label><input type="text" id="fi-concept" class="input" placeholder="Ej. Abono préstamo personal"></div>
+        <div class="input-group"><label class="label">Monto abonado (L) *</label><input type="number" id="fi-amount" class="input" placeholder="0.00" min="0.01" step="any"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px;">
+          <div class="input-group"><label class="label">Monto total préstamo</label><input type="number" id="fi-loan-total" class="input" placeholder="0.00 (opcional)" min="0" step="any"></div>
+          <div class="input-group"><label class="label">Saldo pendiente</label><input type="number" id="fi-balance" class="input" placeholder="0.00 (opcional)" min="0" step="any"></div>
+        </div>
+        <div class="input-group"><label class="label">Notas adicionales</label><textarea id="fi-notes" class="input" placeholder="Forma de pago, observaciones..." rows="2" style="resize:vertical;"></textarea></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button onclick="closeModal('free-invoice')" class="btn btn-outline" style="flex:1;">Cancelar</button>
+      <button onclick="generateFreeInvoice()" class="btn btn-gold" style="flex:2;"><i data-lucide="file-check" size="16"></i> Generar Recibo</button>
     </div>
   </div>
 </div>
@@ -1551,6 +1596,14 @@ function openModal(id) {
       if (el) el.addEventListener('input', updateLoanPreview);
     });
   }
+  if (id === 'free-invoice') {
+    ['fi-debtor','fi-phone','fi-idcard','fi-cuota','fi-concept','fi-notes'].forEach(f => { const el = document.getElementById(f); if(el) el.value=''; });
+    ['fi-amount','fi-loan-total','fi-balance'].forEach(f => { const el = document.getElementById(f); if(el) el.value=''; });
+    document.getElementById('fi-date').value = today();
+    const sel = document.getElementById('fi-client');
+    sel.innerHTML = '<option value="">— Sin cliente vinculado —</option>' +
+      getMyClients().map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  }
 
   lucide.createIcons();
 }
@@ -2269,6 +2322,151 @@ function freqLabel(f) {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────
+// ─── FREE INVOICE ─────────────────────────────────────────────
+function fillFiClientData() {
+  const clientId = document.getElementById('fi-client').value;
+  if (!clientId) {
+    document.getElementById('fi-debtor').value = '';
+    document.getElementById('fi-phone').value = '';
+    document.getElementById('fi-idcard').value = '';
+    return;
+  }
+  const client = DB.clients.find(c => c.id === clientId);
+  if (!client) return;
+  document.getElementById('fi-debtor').value = client.name;
+  document.getElementById('fi-phone').value = client.phone || '';
+  document.getElementById('fi-idcard').value = client.idCard || '';
+}
+
+function generateFreeInvoice() {
+  const debtor  = document.getElementById('fi-debtor').value.trim();
+  const concept = document.getElementById('fi-concept').value.trim();
+  const amountRaw = parseFloat(document.getElementById('fi-amount').value);
+  const date    = document.getElementById('fi-date').value;
+  if (!debtor)  { showToast('El nombre del deudor es obligatorio', 'error'); return; }
+  if (!concept) { showToast('El concepto es obligatorio', 'error'); return; }
+  if (!amountRaw || amountRaw <= 0) { showToast('Ingresa un monto válido', 'error'); return; }
+  if (!date)    { showToast('Selecciona una fecha', 'error'); return; }
+
+  const phone     = document.getElementById('fi-phone').value.trim();
+  const idCard    = document.getElementById('fi-idcard').value.trim();
+  const cuota     = document.getElementById('fi-cuota').value.trim();
+  const notes     = document.getElementById('fi-notes').value.trim();
+  const loanTotal = parseFloat(document.getElementById('fi-loan-total').value) || null;
+  const balance   = parseFloat(document.getElementById('fi-balance').value) || null;
+  const amount    = +(amountRaw).toFixed(2);
+  const receiptNo = 'FAC-' + Date.now().toString(36).toUpperCase().slice(-6);
+  const issuer    = currentUser?.name || '—';
+
+  const safeEsc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const fmt  = n => 'L ' + Math.abs(+(n||0).toFixed(2)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const fmtD = d => { if(!d) return '—'; const [y,m,day]=d.split('-'); return `${day}/${m}/${y}`; };
+  const todayStr = () => new Date().toISOString().split('T')[0];
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Recibo ${receiptNo}</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"><\/script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;background:#e5e7eb;min-height:100vh;padding:20px;}
+.actions{max-width:380px;margin:0 auto 14px;display:flex;gap:8px;}
+.actions button{flex:1;padding:11px 8px;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;}
+.btn-pdf{background:#111;color:#fff;}
+.btn-png{background:#374151;color:#fff;}
+.btn-close{flex:0 0 auto!important;padding:11px 14px;background:#d1d5db;color:#374151;border-radius:8px;border:none;font-size:13px;cursor:pointer;}
+.receipt{max-width:380px;margin:0 auto;background:#fff;border:2px solid #111;font-size:12px;color:#111;}
+.hdr{background:#111;color:#fff;padding:20px 18px 16px;}
+.hdr-top{display:flex;justify-content:space-between;align-items:flex-start;}
+.brand-name{font-size:18px;font-weight:900;letter-spacing:.02em;}
+.brand-sub{font-size:10px;color:#9ca3af;margin-top:2px;}
+.rec-title{text-align:right;}
+.rec-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#9ca3af;}
+.rec-no{font-size:14px;font-weight:900;margin-top:2px;}
+.rec-date{font-size:10px;color:#9ca3af;margin-top:2px;}
+.section{border-bottom:1.5px solid #e5e7eb;}
+.sec-title{background:#f9fafb;padding:6px 14px;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.12em;color:#6b7280;border-bottom:1px solid #e5e7eb;}
+.sec-body{padding:10px 14px;display:flex;flex-direction:column;gap:7px;}
+.row{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
+.lbl{color:#6b7280;font-size:11px;flex-shrink:0;}
+.val{font-weight:700;font-size:11px;color:#111;text-align:right;}
+.divider{height:1px;background:#e5e7eb;margin:3px 0;}
+.amount-box{padding:17px 18px;background:#111;display:flex;justify-content:space-between;align-items:center;}
+.amt-lbl{font-size:12px;font-weight:800;color:#d1d5db;}
+.amt{font-size:28px;font-weight:900;color:#fff;}
+.notes-box{background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;padding:8px 10px;font-size:11px;color:#374151;font-style:italic;margin-top:2px;}
+.footer{padding:13px 14px;text-align:center;border-top:2px dashed #d1d5db;background:#f9fafb;}
+.footer p{font-size:10px;color:#9ca3af;line-height:1.6;}
+.footer .gen{font-size:10px;font-weight:700;color:#374151;margin-top:4px;}
+.seal{width:56px;height:56px;border:2px solid #d1d5db;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:8px auto 0;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;}
+@media print{body{background:white;padding:0;}.actions{display:none!important;}.receipt{max-width:100%;border:none;}}
+</style>
+</head>
+<body>
+<div class="actions">
+  <button class="btn-pdf" onclick="window.print()">🖨️ PDF / Imprimir</button>
+  <button class="btn-png" onclick="exportPNG()">🖼️ Guardar PNG</button>
+  <button class="btn-close" onclick="window.close()">✕</button>
+</div>
+<div class="receipt" id="receipt-card">
+  <div class="hdr">
+    <div class="hdr-top">
+      <div><div class="brand-name">PRÉSTAMOS</div><div class="brand-sub">Gestión de Créditos</div></div>
+      <div class="rec-title"><div class="rec-label">Recibo de Pago</div><div class="rec-no">#${receiptNo}</div><div class="rec-date">📅 ${fmtD(date)}</div></div>
+    </div>
+  </div>
+  <div class="section"><div class="sec-title">Datos del Deudor</div>
+    <div class="sec-body">
+      <div class="row"><span class="lbl">Nombre</span><span class="val">${safeEsc(debtor)}</span></div>
+      ${phone  ? `<div class="row"><span class="lbl">Teléfono</span><span class="val">${safeEsc(phone)}</span></div>` : ''}
+      ${idCard ? `<div class="row"><span class="lbl">Cédula / DNI</span><span class="val">${safeEsc(idCard)}</span></div>` : ''}
+    </div>
+  </div>
+  <div class="section"><div class="sec-title">Concepto</div>
+    <div class="sec-body">
+      <div class="row"><span class="lbl">Descripción</span><span class="val" style="max-width:58%;text-align:right;">${safeEsc(concept)}</span></div>
+      ${cuota ? `<div class="row"><span class="lbl">Cuota / Referencia</span><span class="val">${safeEsc(cuota)}</span></div>` : ''}
+      <div class="row"><span class="lbl">Fecha</span><span class="val">${fmtD(date)}</span></div>
+    </div>
+  </div>
+  ${(loanTotal || balance) ? `<div class="section"><div class="sec-title">Resumen Financiero</div><div class="sec-body">
+    ${loanTotal ? `<div class="row"><span class="lbl">Monto total préstamo</span><span class="val">${fmt(loanTotal)}</span></div>` : ''}
+    ${balance   ? `<div class="row"><span class="lbl">Saldo pendiente</span><span class="val">${fmt(balance)}</span></div>`       : ''}
+  </div></div>` : ''}
+  <div class="amount-box"><div class="amt-lbl">MONTO ABONADO</div><div class="amt">${fmt(amount)}</div></div>
+  ${notes ? `<div class="section"><div class="sec-title">Notas</div><div class="sec-body"><div class="notes-box">${safeEsc(notes)}</div></div></div>` : ''}
+  <div class="footer">
+    <p>Comprobante emitido el <strong>${fmtD(todayStr())}</strong></p>
+    <div class="gen">Emitido por: ${safeEsc(issuer)}</div>
+    <div class="seal">RECIBO</div>
+  </div>
+</div>
+<script>
+function exportPNG(){
+  const el = document.getElementById('receipt-card');
+  const actions = document.querySelector('.actions');
+  if (actions) actions.style.display = 'none';
+  html2canvas(el, {scale:2, useCORS:true, backgroundColor:'#ffffff'}).then(canvas => {
+    const a = document.createElement('a');
+    a.download = 'recibo-${receiptNo}.png';
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+    if (actions) actions.style.display = '';
+  }).catch(() => { if (actions) actions.style.display = ''; alert('Error al generar PNG. Usa la opción PDF.'); });
+}
+<\/script>
+</body></html>`;
+
+  closeModal('free-invoice');
+  const win = window.open('', '_blank', 'width=440,height=720,scrollbars=yes');
+  if (!win) { showToast('Permite las ventanas emergentes para generar el recibo', 'error'); return; }
+  win.document.write(html);
+  win.document.close();
+}
+
 function init() {
   loadDB();
 
